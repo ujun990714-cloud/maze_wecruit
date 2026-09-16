@@ -1,0 +1,791 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="랜턴 불빛에 의지해 미로를 빠져나가는 게임. 절차적으로 생성되는 12단계 미로, 최단 경로(par) 비교, 제한된 힌트.">
+<meta name="color-scheme" content="dark">
+<title>Lantern Labyrinth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ink:        #0d1015;
+    --stone:      #151a21;
+    --stone-hi:   #1e2530;
+    --edge:       #2b3440;
+    --parchment:  #ecdfc6;
+    --muted:      #8f8877;
+    --brass:      #e0a33c;
+    --brass-dim:  #7a5e28;
+    --moss:       #83b26e;
+    --ember:      #d9603f;
+    --display: "Spectral", "Iowan Old Style", Georgia, serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(120% 80% at 50% -10%, #1a212b 0%, rgba(26,33,43,0) 60%),
+      var(--ink);
+    color: var(--parchment);
+    font-family: var(--display);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 680px;
+    margin: 0 auto;
+    padding-inline: 18px;
+    padding-block: 28px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* ---- masthead ---- */
+  header { display: flex; flex-direction: column; gap: 6px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+
+  h1 {
+    margin: 0;
+    font-weight: 700;
+    font-size: clamp(30px, 8vw, 42px);
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  .lede {
+    margin: 0;
+    max-width: 52ch;
+    color: var(--muted);
+    font-size: 15px;
+    font-style: italic;
+  }
+
+  /* ---- readout ---- */
+  .readout {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--edge);
+    border: 1px solid var(--edge);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .stat {
+    background: var(--stone);
+    padding: 9px 10px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .stat dt {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stat dd {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--parchment);
+  }
+
+  .stat dd small {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  .stat.is-record dd { color: var(--brass); }
+
+  /* ---- board ---- */
+  .board {
+    position: relative;
+    background: var(--stone);
+    border: 1px solid var(--edge);
+    border-radius: 3px;
+    padding: 12px;
+    box-shadow: inset 0 0 60px rgba(0,0,0,.55);
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 2px;
+    touch-action: none;
+    outline: none;
+  }
+
+  canvas:focus-visible {
+    box-shadow: 0 0 0 2px var(--brass);
+  }
+
+  .veil {
+    position: absolute;
+    inset: 12px;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(9, 12, 16, .9);
+    border-radius: 2px;
+    text-align: center;
+  }
+
+  .veil-inner { display: flex; flex-direction: column; gap: 10px; align-items: center; max-width: 30ch; }
+
+  .veil h2 {
+    margin: 0;
+    font-size: clamp(22px, 6vw, 28px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .veil p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  .tally {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--parchment);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tally b { color: var(--brass); font-weight: 500; }
+
+  /* ---- controls ---- */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 18px;
+    justify-content: space-between;
+  }
+
+  .pad {
+    display: grid;
+    grid-template-columns: repeat(3, 46px);
+    grid-template-rows: repeat(2, 46px);
+    gap: 5px;
+  }
+
+  .pad button:nth-child(1) { grid-column: 2; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  button {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--parchment);
+    background: var(--stone-hi);
+    border: 1px solid var(--edge);
+    border-radius: 2px;
+    padding: 10px 13px;
+    cursor: pointer;
+    transition: background .14s ease, border-color .14s ease, color .14s ease;
+  }
+
+  .pad button { font-size: 16px; letter-spacing: 0; padding: 0; color: var(--muted); }
+
+  button:hover { background: #262f3c; border-color: #3a4757; color: var(--parchment); }
+  button:active { background: #12171e; }
+  button:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+  button.primary {
+    background: var(--brass);
+    border-color: var(--brass);
+    color: #1a1305;
+    font-weight: 600;
+  }
+  button.primary:hover { background: #f0b451; border-color: #f0b451; color: #1a1305; }
+
+  button[aria-pressed="true"] {
+    border-color: var(--brass-dim);
+    color: var(--brass);
+    background: #221b10;
+  }
+
+  button:disabled { opacity: .38; cursor: not-allowed; }
+  button:disabled:hover { background: var(--stone-hi); border-color: var(--edge); color: var(--parchment); }
+
+  /* ---- key ---- */
+  .key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    padding-top: 4px;
+    border-top: 1px solid var(--edge);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+
+  .key span { display: inline-flex; align-items: center; gap: 7px; }
+
+  .swatch { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+  kbd {
+    font-family: var(--mono);
+    font-size: 10px;
+    border: 1px solid var(--edge);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: var(--parchment);
+    background: var(--stone-hi);
+  }
+
+  @media (max-width: 430px) {
+    .readout { grid-template-columns: repeat(2, 1fr); }
+    .controls { justify-content: center; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+<style>
+  :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Perfect maze &middot; one true path</div>
+    <h1>Lantern Labyrinth</h1>
+    <p class="lede">Your lantern reaches only so far. Feel out the passages, find the ember gate, and try to walk it in par.</p>
+  </header>
+
+  <dl class="readout">
+    <div class="stat">
+      <dt>Depth</dt>
+      <dd id="stat-level">1 <small id="stat-size">9×9</small></dd>
+    </div>
+    <div class="stat">
+      <dt>Elapsed</dt>
+      <dd id="stat-time">0:00</dd>
+    </div>
+    <div class="stat">
+      <dt>Steps / par</dt>
+      <dd id="stat-moves">0 <small id="stat-par">/ 0</small></dd>
+    </div>
+    <div class="stat" id="stat-best-wrap">
+      <dt>Best at depth</dt>
+      <dd id="stat-best">—</dd>
+    </div>
+  </dl>
+
+  <div class="board">
+    <canvas id="maze" width="560" height="560" tabindex="0" aria-label="Maze board. Use arrow keys or W A S D to move."></canvas>
+    <div class="veil" id="veil" hidden>
+      <div class="veil-inner">
+        <h2 id="veil-title">Gate reached</h2>
+        <p id="veil-note">The passage opens onto a deeper floor.</p>
+        <div class="tally" id="veil-tally"></div>
+        <button class="primary" id="veil-btn" type="button">Descend</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="pad" role="group" aria-label="Directional controls">
+      <button type="button" data-dir="up" aria-label="Move up">↑</button>
+      <button type="button" data-dir="left" aria-label="Move left">←</button>
+      <button type="button" data-dir="down" aria-label="Move down">↓</button>
+      <button type="button" data-dir="right" aria-label="Move right">→</button>
+    </div>
+    <div class="actions">
+      <button type="button" id="btn-hint">Hint <span id="hint-count">3</span></button>
+      <button type="button" id="btn-torch" aria-pressed="true">Lantern</button>
+      <button type="button" id="btn-new">New maze</button>
+      <button type="button" id="btn-reset">Depth 1</button>
+    </div>
+  </div>
+
+  <div class="key">
+    <span><i class="swatch" style="background:#d9603f"></i>You</span>
+    <span><i class="swatch" style="background:#83b26e"></i>Gate</span>
+    <span><i class="swatch" style="background:#e0a33c"></i>Hinted path</span>
+    <span><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span>
+    <span>swipe on the board</span>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var N = 1, E = 2, S = 4, W = 8;
+  var DIRS = {
+    up:    { bit: N, opp: S, dx: 0, dy: -1 },
+    right: { bit: E, opp: W, dx: 1, dy: 0 },
+    down:  { bit: S, opp: N, dx: 0, dy: 1 },
+    left:  { bit: W, opp: E, dx: -1, dy: 0 }
+  };
+  var DIR_NAMES = ["up", "right", "down", "left"];
+
+  var C = {
+    floor:   "#11161d",
+    wall:    "#46566a",
+    wallLit: "#8fa4bb",
+    trail:   "rgba(224,163,60,.13)",
+    hint:    "#e0a33c",
+    player:  "#d9603f",
+    goal:    "#83b26e",
+    fog:     "#0d1015"
+  };
+
+  var canvas = document.getElementById("maze");
+  var ctx = canvas.getContext("2d");
+
+  var el = {
+    level: document.getElementById("stat-level"),
+    size: document.getElementById("stat-size"),
+    time: document.getElementById("stat-time"),
+    moves: document.getElementById("stat-moves"),
+    par: document.getElementById("stat-par"),
+    best: document.getElementById("stat-best"),
+    bestWrap: document.getElementById("stat-best-wrap"),
+    veil: document.getElementById("veil"),
+    veilTitle: document.getElementById("veil-title"),
+    veilNote: document.getElementById("veil-note"),
+    veilTally: document.getElementById("veil-tally"),
+    veilBtn: document.getElementById("veil-btn"),
+    hintCount: document.getElementById("hint-count"),
+    btnHint: document.getElementById("btn-hint"),
+    btnTorch: document.getElementById("btn-torch"),
+    btnNew: document.getElementById("btn-new"),
+    btnReset: document.getElementById("btn-reset")
+  };
+
+  var game = null;
+  var hintPath = null;
+  var hintUntil = 0;
+  var torch = true;
+  var rafId = 0;
+
+  /* ---------- persistence (per-viewer convenience only) ---------- */
+  function loadBests() {
+    try {
+      var raw = localStorage.getItem("lantern.bests");
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+  function saveBests(b) {
+    try { localStorage.setItem("lantern.bests", JSON.stringify(b)); } catch (e) {}
+  }
+  var bests = loadBests();
+
+  /* ---------- maze generation: iterative recursive backtracker ---------- */
+  function buildMaze(cols, rows) {
+    var cells = new Uint8Array(cols * rows);
+    for (var i = 0; i < cells.length; i++) cells[i] = N | E | S | W;
+
+    var seen = new Uint8Array(cols * rows);
+    var stack = [0];
+    seen[0] = 1;
+
+    while (stack.length) {
+      var cur = stack[stack.length - 1];
+      var cx = cur % cols, cy = (cur / cols) | 0;
+      var open = [];
+
+      for (var d = 0; d < 4; d++) {
+        var dir = DIRS[DIR_NAMES[d]];
+        var nx = cx + dir.dx, ny = cy + dir.dy;
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+        var ni = ny * cols + nx;
+        if (seen[ni]) continue;
+        open.push([DIR_NAMES[d], ni]);
+      }
+
+      if (!open.length) { stack.pop(); continue; }
+
+      var pick = open[(Math.random() * open.length) | 0];
+      var chosen = DIRS[pick[0]];
+      cells[cur] &= ~chosen.bit;
+      cells[pick[1]] &= ~chosen.opp;
+      seen[pick[1]] = 1;
+      stack.push(pick[1]);
+    }
+    return cells;
+  }
+
+  /* ---------- breadth-first search over open passages ---------- */
+  function solve(g, from, to) {
+    var total = g.cols * g.rows;
+    var prev = new Int32Array(total).fill(-1);
+    var queue = [from];
+    prev[from] = from;
+
+    for (var head = 0; head < queue.length; head++) {
+      var cur = queue[head];
+      if (cur === to) break;
+      var cx = cur % g.cols, cy = (cur / g.cols) | 0;
+      for (var d = 0; d < 4; d++) {
+        var dir = DIRS[DIR_NAMES[d]];
+        if (g.cells[cur] & dir.bit) continue;
+        var nx = cx + dir.dx, ny = cy + dir.dy;
+        if (nx < 0 || ny < 0 || nx >= g.cols || ny >= g.rows) continue;
+        var ni = ny * g.cols + nx;
+        if (prev[ni] !== -1) continue;
+        prev[ni] = cur;
+        queue.push(ni);
+      }
+    }
+
+    if (prev[to] === -1) return [];
+    var path = [to], node = to;
+    while (node !== from) { node = prev[node]; path.push(node); }
+    return path.reverse();
+  }
+
+  function sizeForLevel(level) {
+    return Math.min(9 + (level - 1) * 2, 31);
+  }
+
+  function newGame(level, keepClock) {
+    var n = sizeForLevel(level);
+    var g = {
+      level: level,
+      cols: n,
+      rows: n,
+      cells: buildMaze(n, n),
+      pos: 0,
+      goal: n * n - 1,
+      moves: 0,
+      trail: new Uint8Array(n * n),
+      hints: 3,
+      startedAt: 0,
+      finishedAt: 0
+    };
+    g.trail[0] = 1;
+    g.par = solve(g, 0, g.goal).length - 1;
+    game = g;
+    hintPath = null;
+    hintUntil = 0;
+    el.veil.hidden = true;
+    if (!keepClock) render();
+    syncStats();
+    return g;
+  }
+
+  /* ---------- movement ---------- */
+  function move(name) {
+    if (!game || game.finishedAt) return;
+    var dir = DIRS[name];
+    if (!dir) return;
+    if (game.cells[game.pos] & dir.bit) return;
+
+    var x = game.pos % game.cols, y = (game.pos / game.cols) | 0;
+    var nx = x + dir.dx, ny = y + dir.dy;
+    if (nx < 0 || ny < 0 || nx >= game.cols || ny >= game.rows) return;
+
+    if (!game.startedAt) game.startedAt = Date.now();
+    game.pos = ny * game.cols + nx;
+    game.trail[game.pos] = 1;
+    game.moves++;
+
+    if (game.pos === game.goal) finish();
+    syncStats();
+  }
+
+  function finish() {
+    game.finishedAt = Date.now();
+    var secs = elapsed();
+    var key = String(game.level);
+    var prior = bests[key];
+    var record = !prior || secs < prior.time || (secs === prior.time && game.moves < prior.moves);
+    if (record) {
+      bests[key] = { time: secs, moves: game.moves };
+      saveBests(bests);
+    }
+
+    el.veilTitle.textContent = record && prior ? "New best descent" : "Gate reached";
+    el.veilNote.textContent = game.moves === game.par
+      ? "Walked in par — not one wasted step."
+      : "The passage opens onto a deeper floor.";
+    el.veilTally.innerHTML =
+      "<span>Time <b>" + fmt(secs) + "</b></span>" +
+      "<span>Steps <b>" + game.moves + "</b></span>" +
+      "<span>Par <b>" + game.par + "</b></span>";
+    el.veilBtn.textContent = game.level >= 12 ? "Begin again" : "Descend to " + (game.level + 1);
+    el.veil.hidden = false;
+    el.veilBtn.focus();
+    syncStats();
+  }
+
+  function elapsed() {
+    if (!game || !game.startedAt) return 0;
+    return Math.floor(((game.finishedAt || Date.now()) - game.startedAt) / 1000);
+  }
+
+  function fmt(secs) {
+    var m = Math.floor(secs / 60), s = secs % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+
+  function syncStats() {
+    el.level.firstChild.nodeValue = game.level + " ";
+    el.size.textContent = game.cols + "×" + game.rows;
+    el.time.textContent = fmt(elapsed());
+    el.moves.firstChild.nodeValue = game.moves + " ";
+    el.par.textContent = "/ " + game.par;
+
+    var best = bests[String(game.level)];
+    el.best.textContent = best ? fmt(best.time) : "—";
+    el.bestWrap.classList.toggle("is-record", !!best);
+
+    el.hintCount.textContent = game.hints;
+    el.btnHint.disabled = game.hints === 0 || !!game.finishedAt;
+  }
+
+  /* ---------- drawing ---------- */
+  function render() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var css = canvas.clientWidth || 560;
+    if (canvas.width !== Math.round(css * dpr)) {
+      canvas.width = Math.round(css * dpr);
+      canvas.height = Math.round(css * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    var pad = 8;
+    var size = css - pad * 2;
+    var cell = size / game.cols;
+
+    ctx.fillStyle = C.floor;
+    ctx.fillRect(0, 0, css, css);
+
+    var px = game.pos % game.cols, py = (game.pos / game.cols) | 0;
+
+    // footprints already taken
+    ctx.fillStyle = C.trail;
+    for (var i = 0; i < game.trail.length; i++) {
+      if (!game.trail[i]) continue;
+      var tx = i % game.cols, ty = (i / game.cols) | 0;
+      ctx.fillRect(pad + tx * cell + cell * .18, pad + ty * cell + cell * .18, cell * .64, cell * .64);
+    }
+
+    // gate
+    var gx = game.goal % game.cols, gy = (game.goal / game.cols) | 0;
+    var gcx = pad + gx * cell + cell / 2, gcy = pad + gy * cell + cell / 2;
+    var glow = ctx.createRadialGradient(gcx, gcy, 0, gcx, gcy, cell * 1.6);
+    glow.addColorStop(0, "rgba(131,178,110,.42)");
+    glow.addColorStop(1, "rgba(131,178,110,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(gcx - cell * 1.6, gcy - cell * 1.6, cell * 3.2, cell * 3.2);
+    ctx.fillStyle = C.goal;
+    ctx.beginPath();
+    ctx.arc(gcx, gcy, Math.max(2.5, cell * .22), 0, Math.PI * 2);
+    ctx.fill();
+
+    // hinted route
+    if (hintPath && Date.now() < hintUntil) {
+      ctx.strokeStyle = C.hint;
+      ctx.lineWidth = Math.max(1.5, cell * .16);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.globalAlpha = .75;
+      ctx.setLineDash([cell * .3, cell * .3]);
+      ctx.beginPath();
+      for (var h = 0; h < hintPath.length; h++) {
+        var hx = pad + (hintPath[h] % game.cols) * cell + cell / 2;
+        var hy = pad + ((hintPath[h] / game.cols) | 0) * cell + cell / 2;
+        if (h === 0) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+
+    // walls
+    ctx.lineCap = "square";
+    ctx.lineWidth = Math.max(1.4, cell * .13);
+    for (var y = 0; y < game.rows; y++) {
+      for (var x = 0; x < game.cols; x++) {
+        var c = game.cells[y * game.cols + x];
+        var x0 = pad + x * cell, y0 = pad + y * cell;
+        var near = Math.max(Math.abs(x - px), Math.abs(y - py));
+        ctx.strokeStyle = near <= 1 ? C.wallLit : C.wall;
+        ctx.beginPath();
+        if (c & N) { ctx.moveTo(x0, y0); ctx.lineTo(x0 + cell, y0); }
+        if (c & W) { ctx.moveTo(x0, y0); ctx.lineTo(x0, y0 + cell); }
+        if (x === game.cols - 1 && (c & E)) { ctx.moveTo(x0 + cell, y0); ctx.lineTo(x0 + cell, y0 + cell); }
+        if (y === game.rows - 1 && (c & S)) { ctx.moveTo(x0, y0 + cell); ctx.lineTo(x0 + cell, y0 + cell); }
+        ctx.stroke();
+      }
+    }
+
+    // lantern
+    var pcx = pad + px * cell + cell / 2, pcy = pad + py * cell + cell / 2;
+    if (torch) {
+      var radius = Math.max(cell * 3.4, size * .28);
+      var fog = ctx.createRadialGradient(pcx, pcy, radius * .42, pcx, pcy, radius);
+      fog.addColorStop(0, "rgba(13,16,21,0)");
+      fog.addColorStop(1, "rgba(13,16,21,.94)");
+      ctx.fillStyle = fog;
+      ctx.fillRect(0, 0, css, css);
+      ctx.fillStyle = "rgba(13,16,21,.94)";
+      ctx.fillRect(0, 0, css, Math.max(0, pcy - radius));
+      ctx.fillRect(0, Math.min(css, pcy + radius), css, css);
+      ctx.fillRect(0, Math.max(0, pcy - radius), Math.max(0, pcx - radius), Math.min(css, radius * 2));
+      ctx.fillRect(Math.min(css, pcx + radius), Math.max(0, pcy - radius), css, Math.min(css, radius * 2));
+    }
+
+    // you
+    var halo = ctx.createRadialGradient(pcx, pcy, 0, pcx, pcy, cell * 1.4);
+    halo.addColorStop(0, "rgba(217,96,63,.5)");
+    halo.addColorStop(1, "rgba(217,96,63,0)");
+    ctx.fillStyle = halo;
+    ctx.fillRect(pcx - cell * 1.4, pcy - cell * 1.4, cell * 2.8, cell * 2.8);
+    ctx.fillStyle = C.player;
+    ctx.beginPath();
+    ctx.arc(pcx, pcy, Math.max(2.5, cell * .26), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function loop() {
+    render();
+    if (game && game.startedAt && !game.finishedAt) el.time.textContent = fmt(elapsed());
+    rafId = requestAnimationFrame(loop);
+  }
+
+  /* ---------- input ---------- */
+  var KEYS = {
+    ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+    w: "up", a: "left", s: "down", d: "right",
+    W: "up", A: "left", S: "down", D: "right"
+  };
+
+  window.addEventListener("keydown", function (ev) {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    var name = KEYS[ev.key];
+    if (!name) return;
+    ev.preventDefault();
+    move(name);
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll(".pad button"), function (b) {
+    b.addEventListener("click", function () { move(b.dataset.dir); });
+  });
+
+  var touchStart = null;
+  canvas.addEventListener("pointerdown", function (ev) {
+    canvas.focus();
+    touchStart = { x: ev.clientX, y: ev.clientY };
+  });
+  canvas.addEventListener("pointerup", function (ev) {
+    if (!touchStart) return;
+    var dx = ev.clientX - touchStart.x, dy = ev.clientY - touchStart.y;
+    touchStart = null;
+    if (Math.abs(dx) < 18 && Math.abs(dy) < 18) return;
+    move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up"));
+  });
+
+  el.btnHint.addEventListener("click", function () {
+    if (!game || game.hints === 0 || game.finishedAt) return;
+    game.hints--;
+    hintPath = solve(game, game.pos, game.goal);
+    hintUntil = Date.now() + 2600;
+    syncStats();
+    canvas.focus();
+  });
+
+  el.btnTorch.addEventListener("click", function () {
+    torch = !torch;
+    el.btnTorch.setAttribute("aria-pressed", String(torch));
+    canvas.focus();
+  });
+
+  el.btnNew.addEventListener("click", function () { newGame(game.level); canvas.focus(); });
+  el.btnReset.addEventListener("click", function () { newGame(1); canvas.focus(); });
+  el.veilBtn.addEventListener("click", function () {
+    newGame(game.level >= 12 ? 1 : game.level + 1);
+    canvas.focus();
+  });
+
+  window.addEventListener("resize", function () { if (game) render(); });
+
+  /* ---------- boot (survives a republish) ---------- */
+  function start(saved) {
+    newGame(saved && saved.level ? saved.level : 1);
+    if (saved && saved.cells && saved.cells.length === game.cells.length) {
+      game.cells = Uint8Array.from(saved.cells);
+      game.trail = Uint8Array.from(saved.trail);
+      game.pos = saved.pos;
+      game.moves = saved.moves;
+      game.hints = saved.hints;
+      game.startedAt = saved.startedAt || 0;
+      game.par = solve(game, 0, game.goal).length - 1;
+      syncStats();
+    }
+    cancelAnimationFrame(rafId);
+    loop();
+    canvas.focus();
+  }
+
+  if (window.claude && window.claude.hot) {
+    window.claude.hot.snapshot(function () {
+      return {
+        level: game.level,
+        cells: Array.from(game.cells),
+        trail: Array.from(game.trail),
+        pos: game.pos,
+        moves: game.moves,
+        hints: game.hints,
+        startedAt: game.startedAt
+      };
+    });
+  }
+
+  if (window.claude && window.claude.hot && window.claude.hot.ready) {
+    window.claude.hot.ready(start);
+  } else {
+    start((window.claude && window.claude.hot && window.claude.hot.data) || {});
+  }
+})();
+</script>
+
+</body>
+</html>
